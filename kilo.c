@@ -26,8 +26,8 @@ struct editorConfig E;
 /* terminal */
 
 void die(const char *s){
-  write(STDOUT_FILENO, "\x1b[2J", 4);
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  write(STDOUT_FILENO, "\x1b[2J", 4); // clear fullscreen
+  write(STDOUT_FILENO, "\x1b[H", 3); // cursor in top-left
 
   perror(s);
   exit(1);
@@ -62,16 +62,16 @@ char editorReadKey() {
   int nread;
   char c;
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-    if (nread == -1 && errno != EAGAIN) die("read");
+    if (nread == -1 && errno != EAGAIN) die("read"); // EAGAIN = no data available. EAGAIN is not a read error here.
   }
   return c;
 }
 
 int getCursorPosition(int *rows, int *cols) {
-  char buf[32];
+  char buf[32]; // buffer
   unsigned int i = 0;
 
-	if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+	if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1; // n = Device Status Report. Argument 6 for cursor position
   
   while (i < sizeof(buf) - 1) {
     if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
@@ -79,20 +79,20 @@ int getCursorPosition(int *rows, int *cols) {
     i++;
   }
 
-  buf[i] = '\0';
+  buf[i] = '\0';  
 
-  printf("\r\n&buff[1]: '%s'\r\n", &buf[1]);
 
-	editorReadKey();
+  if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
 
-	return -1;
+  return 0;
 }
 
 int getWindowSize(int *rows, int *cols) {
   struct winsize ws;
 
-  if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1; // C = Cursor Forward Command, B = Cursor Down Command. 999 is a large enough number.
     editorReadKey();
     return getCursorPosition(rows,cols);
   } else {
@@ -108,8 +108,8 @@ void editorProcessKeypress() {
   char c = editorReadKey();
 
   switch(c) {
-    case CTRL_KEY('q'):
-      write(STDOUT_FILENO, "\x1b[2J", 4);
+    case CTRL_KEY('q'): // CTRL+Q to quit
+      write(STDOUT_FILENO, "\x1b[2J", 4); //
       write(STDOUT_FILENO, "\x1b[H", 3);
   
       exit(0);
@@ -118,26 +118,32 @@ void editorProcessKeypress() {
 }
 
 /* output */
-
 void editorDrawRows() {
+// draw tildes
+
   int y;
   for (y = 0; y < E.screenrows; y++) {
-    write(STDOUT_FILENO, "~\r\n", 3);
+    write(STDOUT_FILENO, "~", 1);
+
+    if (y < E.screenrows - 1) {
+      write(STDOUT_FILENO, "\r\n", 2);
+    }
   }
 }
 
 void editorRefreshScreen() {
-  write(STDOUT_FILENO, "\x1b[2J", 4);
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  write(STDOUT_FILENO, "\x1b[2J", 4); // J = erase in display command. \x1b[ is the escape sequence (27 in decimal). 2 is the argument of J command, meaning clear all screen.
+  write(STDOUT_FILENO, "\x1b[H", 3); // H = cursor reposition command. Default arguments are 1;1, so it places the cursor in the top-left position.
 
-  editorDrawRows();
+  editorDrawRows(); // draw tildes
 
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  write(STDOUT_FILENO, "\x1b[H", 3); // back in top-left
 }
 
 /* init */
 
 void initEditor() {
+// get window size.
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 } 
 
