@@ -1,6 +1,7 @@
 /* includes */
 #include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -10,6 +11,7 @@
 /* defines */
 
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define KILO_VERSION "0.0.1"
 
 // STDIN_FILENO e din unistd.h
 
@@ -102,6 +104,28 @@ int getWindowSize(int *rows, int *cols) {
     }
 }
 
+/* append buffer */
+
+struct abuf {
+  char *b;
+  int len
+};
+
+void abAppend(struct abuf *ab, const char *s, int len) {
+  char *new = realloc(ab->b, ab->len +len);
+
+  if(new == NULL) return;
+  memcpy(&new[ab->len], s, len);
+  ab->b = new;
+  ab->len += len;
+}
+
+void abFree(struct abuf *ab) {
+  free(ab->b);
+}
+
+#define ABUF_INIT {NULL, 0}
+
 /* input */
 
 void editorProcessKeypress() {
@@ -118,28 +142,48 @@ void editorProcessKeypress() {
 }
 
 /* output */
-void editorDrawRows() {
+
+void editorDrawRows(struct abuf *ab) {
 // draw tildes
 
   int y;
   for (y = 0; y < E.screenrows; y++) {
-    write(STDOUT_FILENO, "~", 1);
+    if (y == E.screenrows / 3) {
+      char welcome[80];
+      int welcomelen = snprintf(welcome, sizeof(welcome),
+          "Kilo editor -- version %s", KILO_VERSION);
+      if (welcomelen > E.screencols) welcomelen = E.screencols;
+      int padding = (E.screencols - welcomelen) / 2;
+      if (padding) {
+        abAppend(ab, "~", 1);
+        padding--;
+      }
+      while(padding--) abAppend(ab, " ", 1);
+      abAppend(ab, welcome, welcomelen);
+    } else
+      abAppend(ab, "~", 1);
 
+    abAppend(ab, "\x1b[K", 3); // K = Erase in Line Command. Argument 2 = whole line, 1 = left of the line, 0 = right of the line. 0 is default (our option).
     if (y < E.screenrows - 1) {
-      write(STDOUT_FILENO, "\r\n", 2);
+      abAppend(ab, "\r\n", 2);
     }
   }
 }
 
 void editorRefreshScreen() {
-  write(STDOUT_FILENO, "\x1b[2J", 4); // J = erase in display command. \x1b[ is the escape sequence (27 in decimal). 2 is the argument of J command, meaning clear all screen.
-  write(STDOUT_FILENO, "\x1b[H", 3); // H = cursor reposition command. Default arguments are 1;1, so it places the cursor in the top-left position.
+  struct abuf ab = ABUF_INIT;
+  
+  abAppend(&ab, "\x1b[?25l", 6); // show/hide cursor with the same command.
+  abAppend(&ab, "\x1b[H", 3);
 
-  editorDrawRows(); // draw tildes
+  editorDrawRows(&ab);
 
-  write(STDOUT_FILENO, "\x1b[H", 3); // back in top-left
+  abAppend(&ab, "\x1b[H", 3);
+  abAppend(&ab, "\x1b[?25l", 6);
+
+  write(STDOUT_FILENO, ab.b, ab.len); // J = erase in display command. \x1b[ is the escape sequence (27 in decimal). 2 is the argument of J command, meaning clear all screen.
+  abFree(&ab); // H = cursor reposition command. Default arguments are 1;1, so it places the cursor in the top-left position.
 }
-
 /* init */
 
 void initEditor() {
